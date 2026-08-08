@@ -18,3 +18,8 @@ curl -X POST "http://127.0.0" \
      -H "Content-Type: application/json" \
      -d '{"farm_id": "Zone-A_BerryFarm", "soil_moisture": 42.5, "temperature": 34.2, "humidity": 60.0}'
 
+textiaptms-project/
+│
+├── main.py            # FastAPI Backend (IoT Ingestion, ML & VRPTW Engine)
+└── templates/
+    └── index.html     # Frontend Live-Monitoring Dashboard
