@@ -1,0 +1,108 @@
+import json
+import asyncio
+import math
+import random
+from datetime import datetime
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+
+app = FastAPI(title="IAPTMS Core Engine")
+
+# --- DATA MODELS ---
+class IoTSensorPayload(BaseModel):
+    farm_id: str
+    soil_moisture: float
+    temperature: float
+    humidity: float
+
+# --- MEMORY DATABASE & STATE ---
+connected_clients = set()
+active_fleet = {
+    "Truck-A14": {"lat": 18.5204, "lng": 73.8567, "temp": 4.2, "status": "Dispatched"},
+    "Truck-B02": {"lat": 18.5310, "lng": 73.8445, "temp": 5.1, "status": "Idle"},
+    "Truck-C09": {"lat": 18.5122, "lng": 73.8612, "temp": 12.8, "status": "Cold-Chain Breach Alert"}
+}
+
+# --- OPTIMIZATION ALGORITHMS ---
+def predict_harvest_maturity(moisture: float, temp: float) -> dict:
+    """Simulates a predictive Random Forest Regressor for crop yield and maturity window."""
+    # Logic: Higher temps + lower optimal moisture accelerates maturity
+    days_to_harvest = max(1, int(30 - (temp * 0.5) - (moisture * 0.2)))
+    projected_yield_tons = round((moisture * 0.15) + (temp * 0.08), 2)
+    return {"days_remaining": days_to_harvest, "projected_yield_tons": max(1.0, projected_yield_tons)}
+
+def solve_vrptw_dispatch(farm_lat: float, farm_lng: float) -> str:
+    """Solves a simplified Vehicle Routing Problem by finding the closest optimal truck."""
+    best_truck = None
+    min_distance = float('inf')
+    
+    for truck_id, data in active_fleet.items():
+        if data["status"] == "Cold-Chain Breach Alert":
+            continue # Skip broken assets
+        # Haversine approximation
+        dist = math.sqrt((data["lat"] - farm_lat)**2 + (data["lng"] - farm_lng)**2)
+        if dist < min_distance:
+            min_distance = dist
+            best_truck = truck_id
+            
+    return best_truck or "No Available Fleet Asset"
+
+# --- API ENDPOINTS & LIVE WEBSOCKETS ---
+@app.post("/api/telemetry/ingest")
+async def ingest_iot_data(data: IoTSensorPayload):
+    """API Endpoint where IoT devices / LoRaWAN gateways post real-time data."""
+    # 1. Run Predictive Analytics
+    predictions = predict_harvest_maturity(data.soil_moisture, data.temperature)
+    
+    # Mock farm coordinates
+    farm_lat, farm_lng = 18.5500, 73.8800 
+    
+    # 2. Trigger Automated VRPTW Dispatch optimization if maturity is imminent
+    dispatch_status = "Monitoring"
+    assigned_truck = "None"
+    if predictions["days_remaining"] <= 3:
+        assigned_truck = solve_vrptw_dispatch(farm_lat, farm_lng)
+        dispatch_status = f"Dispatched {assigned_truck}"
+        if assigned_truck in active_fleet:
+            active_fleet[assigned_truck]["status"] = "In Transit to Farm"
+
+    # 3. Construct Live Telemetry Update
+    event_payload = {
+        "timestamp": datetime.now().strftime("%H:%M:%S"),
+        "farm_id": data.farm_id,
+        "soil_moisture": data.soil_moisture,
+        "temperature": data.temperature,
+        "predictions": predictions,
+        "dispatch_status": dispatch_status,
+        "assigned_truck": assigned_truck,
+        "fleet": active_fleet
+    }
+    
+    # Broadcast telemetry instantly to all connected UI web dashboards
+    await broadcast_to_dashboards(event_payload)
+    return {"status": "Success", "processed_metrics": event_payload}
+
+@app.websocket("/ws/dashboard")
+async def websocket_endpoint(websocket: WebSocket):
+    """Establishes persistent low-latency streaming pipeline to UI dashboards."""
+    await websocket.accept()
+    connected_clients.add(websocket)
+    try:
+        while True:
+            await websocket.receive_text() # Keep connection alive
+    except WebSocketDisconnect:
+        connected_clients.remove(websocket)
+
+async def broadcast_to_dashboards(data: dict):
+    if not connected_clients: return
+    message = json.dumps(data)
+    await asyncio.gather(*[client.send_text(message) for client in connected_clients])
+
+# Serving UI Page
+@app.get("/", response_class=HTMLResponse)
+async def get_dashboard():
+    with open("templates/index.html", "r") as f:
+        return HTMLResponse(content=f.read())
