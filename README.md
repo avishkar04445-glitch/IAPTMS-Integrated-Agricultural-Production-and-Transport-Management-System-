@@ -1,0 +1,2 @@
+# IAPTMS-Integrated-Agricultural-Production-and-Transport-Management-System-
+Global food security is heavily reliant on the efficiency of agricultural supply chains. Traditionally, agricultural production planning and transportation logistics operate as isolated systems. This information asymmetry leads to significant post-harvest losses, inflated fuel emissions, and sub-optimal fleet utilization.
