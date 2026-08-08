@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IAPTMS Real-Time Control Simulator</title>
+    <script src="https://jsdelivr.net"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 20px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .card { background: #1e293b; padding: 20px; border-radius: 8px; border: 1px solid #334155; }
+        h2 { color: #38bdf8; margin-top: 0; border-bottom: 1px solid #334155; padding-bottom: 8px; }
+        .log-box { background: #020617; height: 180px; overflow-y: scroll; padding: 10px; font-family: monospace; font-size: 13px; border-radius: 4px; color: #4ade80; }
+        .alert { color: #f87171; font-weight: bold; }
+        .metric-highlight { font-size: 24px; font-weight: bold; color: #a7f3d0; margin: 10px 0; }
+    </style>
+</head>
+<body>
+
+    <h1>AG-LOGISTIC SIMULATOR 1.1 (Live Dashboard)</h1>
+    
+    <div class="grid">
+        <!-- Module 1: IoT Edge Agronomic Ingestion -->
+        <div class="card">
+            <h2>1. IoT Field Telemetry Ingestion</h2>
+            <div id="field-data">Awaiting sensor streaming metrics...</div>
+            <canvas id="telemetryChart" height="100"></canvas>
+        </div>
+
+        <!-- Module 2: AI Optimization and Prediction -->
+        <div class="card">
+            <h2>2. ML Harvest Window Estimation</h2>
+            <div>Projected Volume Yield:</div>
+            <div class="metric-highlight" id="yield-metric">0.00 Tons</div>
+            <div>Estimated Days to Peak Harvest:</div>
+            <div class="metric-highlight" id="harvest-metric">-- Days</div>
+        </div>
+
+        <!-- Module 3: VRPTW Asset Routing Log -->
+        <div class="card">
+            <h2>3. Resource Allocation Engine (GA/VRPTW)</h2>
+            <div class="log-box" id="dispatch-logs"></div>
+        </div>
+
+        <!-- Module 4: Cold-Chain Fleet Status -->
+        <div class="card">
+            <h2>4. Cold-Chain Fleet Telemetry</h2>
+            <div id="fleet-data">System initializing...</div>
+        </div>
+    </div>
+
+    <script>
+        // Init Real-time charts
+        const ctx = document.getElementById('telemetryChart').getContext('2d');
+        const telemetryChart = new Chart(ctx, {
+            type: 'line',
+            data: { labels: [], datasets: [{ label: 'Soil Temp (°C)', data: [], borderColor: '#f59e0b', tension: 0.1 }] },
+            options: { scales: { y: { grid: { color: '#334155' } } } }
+        });
+
+        // Initialize low-latency WebSocket stream loop
+        const ws = new WebSocket(`ws://${window.location.host}/ws/dashboard`);
+        
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.target.data);
+            
+            // 1. Update Ingestion view
+            document.getElementById('field-data').innerHTML = `
+                <strong>Active Hub:</strong> ${data.farm_id} <br>
+                <strong>Soil Moisture:</strong> ${data.soil_moisture}% | 
+                <strong>Ambient Air:</strong> ${data.temperature}°C
+            `;
+            
+            // Update live line graph
+            if(telemetryChart.data.labels.length > 7) { telemetryChart.data.labels.shift(); telemetryChart.data.datasets[0].data.shift(); }
+            telemetryChart.data.labels.push(data.timestamp);
+            telemetryChart.data.datasets[0].data.push(data.temperature);
+            telemetryChart.data.update();
+
+            // 2. Update ML Analytics Module
+            document.getElementById('yield-metric').innerText = `${data.predictions.projected_yield_tons} Metric Tons`;
+            document.getElementById('harvest-metric').innerText = `${data.predictions.days_remaining} Days`;
+
+            // 3. Update VRPTW Routing Logs
+            const logBox = document.getElementById('dispatch-logs');
+            const logEntry = `[${data.timestamp}] Farm ${data.farm_id} Status: ${data.dispatch_status} (Assigned Asset: ${data.assigned_truck})<br>`;
+            logBox.innerHTML = logEntry + logBox.innerHTML;
+
+            // 4. Update Fleet Track logs
+            let fleetHtml = "<ul>";
+            for (const [truck, info] of Object.entries(data.fleet)) {
+                let statusClass = info.status.includes("Breach") ? "class='alert'" : "";
+                fleetHtml += `<li ${statusClass}><strong>${truck}</strong>: Temp ${info.temp}°C | Status: ${info.status} (Coords: ${info.lat}, ${info.lng})</li>`;
+            }
+            fleetHtml += "</ul>";
+            document.getElementById('fleet-data').innerHTML = fleetHtml;
+        };
+    </script>
+</body>
+</html>
